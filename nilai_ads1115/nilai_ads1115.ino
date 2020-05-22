@@ -24,10 +24,10 @@ void loop(void)
   adc2 = ads.readADC_SingleEnded(2);
   adc3 = ads.readADC_SingleEnded(3);
 
-  voltage0 = (adc0 * 0.1876)/1000;
-  voltage1 = (adc1 * 0.1876)/1000;
-  voltage2 = (adc2 * 0.1876)/1000;
-  voltage3 = (adc3 * 0.1876)/1000;
+  voltage0 = (adc0 * 0.1875)/1000;
+  voltage1 = (adc1 * 0.1875)/1000;
+  voltage2 = (adc2 * 0.1875)/1000;
+  voltage3 = (adc3 * 0.1875)/1000;
   
   Serial.print("AIN0: ");
   Serial.print(adc0);

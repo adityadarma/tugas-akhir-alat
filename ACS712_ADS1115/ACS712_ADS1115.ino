@@ -1,93 +1,58 @@
 #include <Wire.h>
 #include <Adafruit_ADS1015.h>
+#include <LiquidCrystal_I2C.h>
 
-Adafruit_ADS1115 ads(0x48);  /* Use this for the 16-bit version */
+Adafruit_ADS1115 ads(0x48);
+LiquidCrystal_I2C lcd(0x27 ,16,2);
+int pin_acs = 0;
+int zero = 0;
 
-// ads.setGain(GAIN_TWOTHIRDS);  // 2/3x gain +/- 6.144V  1 bit = 3mV (default)
-// ads.setGain(GAIN_ONE);     // 1x gain   +/- 4.096V  1 bit = 2mV
-// ads.setGain(GAIN_TWO);     // 2x gain   +/- 2.048V  1 bit = 1mV
-// ads.setGain(GAIN_FOUR);    // 4x gain   +/- 1.024V  1 bit = 0.5mV
-// ads.setGain(GAIN_EIGHT);   // 8x gain   +/- 0.512V  1 bit = 0.25mV
-// ads.setGain(GAIN_SIXTEEN); // 16x gain  +/- 0.256V  1 bit = 0.125mV
-
-unsigned int Sensitivity = 185;   // 185mV/A for 5A, 100 mV/A for 20A and 66mV/A for 30A Module
-float Vpp = 0; // peak-peak voltage
-float Vrms = 0; // rms voltage
-float Irms = 0; // rms current
-float Supply_Voltage = 247.0;           // reading from DMM
-float Vcc = 5.0;         // ADC reference voltage // voltage at 5V pin
-float power = 0;         // power in watt            
-float Wh =0 ;             // Energy in kWh
-unsigned long last_time =0;
-unsigned long current_time =0;
-unsigned long interval = 100;
-unsigned int calibration = 12;  // V2 slider calibrates this
-unsigned int pF = 85;           // Power Factor default 95
-
-
-void getACS712() {  // for AC
-  Vpp = getVPP();
-  Vrms = (Vpp/2.0) *0.707;
-  Vrms = Vrms - (calibration / 10000.0);     // calibtrate to zero with slider
-  Irms = (Vrms * 1000)/Sensitivity ;
-  if((Irms > -0.015) && (Irms < 0.008)){  // remove low end chatter
-    Irms = 0.0;
-  }
-  power= (Supply_Voltage * Irms) * (pF / 100.0);
-  last_time = current_time;
-  current_time = millis();  
-  Wh = Wh+  power *(( current_time -last_time) /3600000.0) ; // calculating energy in Watt-Hour
-
-  Serial.print("Irms:  ");
-  Serial.print(String(Irms, 3));
-  Serial.println(" A");
-  Serial.print("Power: "); 
-  Serial.print(String(power, 3));
-  Serial.print(" W");
-  Serial.print("\t Energy Unit(s) (KWh): ");
-  Serial.println(String((Wh/1000), 4));
-
-}
-
-float getVPP()
+void setup() 
 {
-  int16_t adc1;
-  float result;
-  int readValue;              
-  int maxValue = 0;           
-  int minValue = 32768;        
-  uint32_t start_time = millis();
-
-
-
-  while((millis()-start_time) < 950) //read every 0.95 Sec
-  {
-     readValue = ads.readADC_SingleEnded(0);  
-     if (readValue > maxValue)
-     {       
-         maxValue = readValue;
-     }
-     if (readValue < minValue)
-     {        
-         minValue = readValue;
-     }
-  }
-   result = ((maxValue - minValue) * Vcc) / 32768.0;
-   Serial.print("\nVp-p:  ");
-   Serial.println(String(result, 3));
- 
-   return result;
-}
-
-
-void setup() {
-  Serial.begin(9600);
+//  Serial.begin(9600);  
   ads.begin();
+  lcd.begin ();
+  calibrate();
 }
 
-void loop()
+void loop() 
 {
+  lcd.setCursor(0, 0);
+  lcd.print("Zero  : " + String(zero));
+  lcd.setCursor(0, 1);
+  lcd.print("Ampere: " + String(getACS()));
+//  Serial.println(getACS());
+//  Serial.println();
 
-  getACS712();
-  delay (2000);
+  delay(1000);
+}
+
+float getACS(){
+  uint32_t period = 1000000 / 50;
+  uint32_t t_start = micros();
+
+  int16_t dataMax = 0;
+  int16_t Inow;
+  uint32_t Isum = 0;
+  uint16_t measurements_count = 0;
+
+  while (micros() - t_start < period) {
+    for (int i = 0; i < 10; i++) {
+      int adc = ads.readADC_SingleEnded(pin_acs);
+      if (adc > dataMax) dataMax = adc;
+    }
+    Inow = dataMax - zero;
+    Isum += Inow * Inow;
+    measurements_count++;
+  }
+  return sqrt(Isum / measurements_count) / 32735 * 6.138 / 0.066;
+}
+
+void calibrate() {
+  uint32_t acc = 0;
+  int sampling = 100;
+  for (int i = 0; i < sampling; i++) {
+    acc += ads.readADC_SingleEnded(pin_acs);
+  }
+  zero = acc / sampling;
 }
