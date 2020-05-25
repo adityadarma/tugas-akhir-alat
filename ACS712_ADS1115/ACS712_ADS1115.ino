@@ -9,7 +9,6 @@ int zero = 0;
 
 void setup() 
 {
-//  Serial.begin(9600);  
   ads.begin();
   lcd.begin ();
   calibrate();
@@ -21,8 +20,6 @@ void loop()
   lcd.print("Zero  : " + String(zero));
   lcd.setCursor(0, 1);
   lcd.print("Ampere: " + String(getACS()));
-//  Serial.println(getACS());
-//  Serial.println();
 
   delay(1000);
 }

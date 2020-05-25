@@ -25,6 +25,10 @@ LiquidCrystal_I2C lcd(0x27 ,16,2);
 Adafruit_ADS1115 ads(0x48);
 
 // array dan object json
+StaticJsonDocument<200> json;
+JsonObject object = json.to<JsonObject>();
+char jsonReal[200];
+
 StaticJsonDocument<4096> doc;
 JsonArray d_voltase = doc.createNestedArray("voltase");
 JsonArray d_arus = doc.createNestedArray("arus");
@@ -36,7 +40,7 @@ char jsonData[4096];
 float windowLength = 100/frequency;    
 int voltase_actual = 0;
 int RawValue = 0;
-unsigned long printPeriod = 1000;
+unsigned long printPeriod = 2500;
 unsigned long previousMillis = 0;
 
 // sensor acs712
@@ -44,13 +48,21 @@ int pin_acs = 0;
 int zero;
 float arus_actual = 0;
 
-
 RunningStatistics inputStats;
+
+void calibrate_acs712() {
+  uint32_t acc = 0;
+  int sampling = 100;
+  for (int i = 0; i < sampling; i++) {
+    acc += ads.readADC_SingleEnded(pin_acs);
+  }
+  zero = acc / sampling;
+}
+
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   lcd.begin ();
   WiFi.begin(ssid, password);
-  
   
   lcd.setCursor(0, 0);
   lcd.print("Status wifi:");
@@ -72,23 +84,21 @@ void setup() {
   calibrate_acs712();
 
   timer.setInterval(1000, tempData);
-//  timer.setInterval(30000, upload);
+  timer.setInterval(10000, ubah);
+  timer.setInterval(30000, upload);
 }
 
 void loop() {
   timer.run();
-  cekWifi();
-  ReadVoltage();
-}
-
-void cekWifi(){    
-  while(WiFi.status() != WL_CONNECTED) {
+  RawValue = analogRead(ZMPT101B);
+  inputStats.input(RawValue);
+  if((unsigned long)(millis() - previousMillis) >= printPeriod) {
+    previousMillis = millis();
+    voltase_actual = inputStats.sigma() * 2.5;
+    get_arus();
+    
     lcd.setCursor(0, 0);
-    lcd.print("Status wifi:");
-    lcd.setCursor(0, 1);
-    lcd.print("Menghubungkan");
-    delay(1000);
-    lcd.clear();
+    lcd.print("V:" + String(voltase_actual) +"   ");
   }
 }
 
@@ -97,36 +107,36 @@ void tempData(){
   d_voltase.add(voltase_actual);
 
   // arus
-  arus_actual = get_arus();
   d_arus.add(arus_actual);
-
+  
   // daya
   daya_actual = voltase_actual*arus_actual;
+  lcd.setCursor(0, 1);
+  lcd.print("P:" + String(daya_actual) +"   ");
   d_daya.add(daya_actual);
+}
 
-  if(!statusUpload){
-    lcd.setCursor(0, 0);
-    lcd.print("V:" + String(voltase_actual) +"   ");
-    lcd.setCursor(8, 0);
-    lcd.print("A:" + String(arus_actual) +"   "); 
-    lcd.setCursor(0, 1);
-    lcd.print("P:" + String(daya_actual) +"   ");
-    lcd.setCursor(8, 1);
-    lcd.print("W:" + String(res_time) + "ms ");
-  }
+void ubah(){
+  object["voltase"] = voltase_actual;
+  object["arus"] = arus_actual;
+  object["daya"] = daya_actual;
+  serializeJson(object, jsonReal);
+  
+  const char* serverName = "http://restapi-ta.kubusoftware.com/pantauan"; // Alamat server Online
+  http.begin(serverName);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Authorization", api_key);
+  int httpResponseCode = http.POST(jsonReal);
 }
 
 void upload(){
   if(WiFi.status() == WL_CONNECTED){
-    int waktu = millis();
     serializeJson(doc, jsonData);
-    statusUpload = true;
-  
-    lcd.setCursor(0, 0);
-    lcd.print("Koneksi :         "); 
-    lcd.setCursor(0, 1);
-    lcd.print("Mengirim data     "); 
-
+    lcd.setCursor(8, 1);
+    lcd.print("Upload");
+    
+    //upload data
+    int waktu = millis();
     const char* serverName = "http://restapi-ta.kubusoftware.com/penggunaan"; // Alamat server Online
     http.begin(serverName);
     http.addHeader("Content-Type", "application/json");
@@ -136,18 +146,14 @@ void upload(){
     if (httpResponseCode == 201) {
       res_time = millis() - waktu;
       deleteData();
-      lcd.setCursor(0, 1);
-      lcd.print("Data terkirim");
       String payload = http.getString();
-      Serial.println(payload);
     }else{
       res_time = 0;
-      lcd.setCursor(0, 1);
-      lcd.print("Pengiriman gagal");
     }
     http.end();
     delay(100);
-    statusUpload = false;
+    lcd.setCursor(8, 1);
+    lcd.print("W:" + String(res_time) + "ms ");
   }
 }
 
@@ -158,42 +164,25 @@ void deleteData(){
     JsonArray d_daya = doc.createNestedArray("daya");
 }
 
-void calibrate_acs712() {
-  uint32_t acc = 0;
-  int sampling = 100;
-  for (int i = 0; i < sampling; i++) {
-    acc += ads.readADC_SingleEnded(pin_acs);
-  }
-  zero = acc / sampling;
-}
-
-void ReadVoltage(){
-  RawValue = analogRead(ZMPT101B);
-  inputStats.input(RawValue);
-        
-  if((unsigned long)(millis() - previousMillis) >= printPeriod) {
-    previousMillis = millis();
-    voltase_actual = inputStats.sigma() * 1.25;
-  }
-}
-
-float get_arus(){
-  uint32_t period = 1000000 / frequency;
+void get_arus(){
+  uint32_t period = 1000;
   uint32_t t_start = micros();
 
   int16_t dataMax = 0;
   int16_t Inow;
   uint32_t Isum = 0;
-  uint16_t measurements_count = 0;
+  int measurements_count = 0;
 
   while (micros() - t_start < period) {
     for (int i = 0; i < 10; i++) {
       int adc = ads.readADC_SingleEnded(pin_acs);
       if (adc > dataMax) dataMax = adc;
     }
-    Inow = ads.readADC_SingleEnded(pin_acs) - zero;
+    Inow = dataMax - zero;
     Isum += Inow * Inow;
     measurements_count++;
   }
-  return sqrt(Isum / measurements_count) / 32735 * 6.138 / 0.066;
+  arus_actual = sqrt(Isum / measurements_count) / 32767 * 6.144 / 0.066;
+  lcd.setCursor(8, 0);
+  lcd.print("I:" + String(arus_actual) +"   "); 
 }

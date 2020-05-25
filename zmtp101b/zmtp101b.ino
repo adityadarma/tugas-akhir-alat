@@ -37,7 +37,7 @@ float ReadVoltage(){
   if((unsigned long)(millis() - previousMillis) >= printPeriod) { //We calculate and display every 1s
     previousMillis = millis();   // update time
     
-    int hasil = inputStats.sigma() * 1.25;
+    int hasil = inputStats.sigma() * 2.5;
 
     lcd.setCursor(0, 1);
     lcd.print(hasil);
