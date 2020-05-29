@@ -15,41 +15,37 @@ const char* api_key = "Bearer 3HhTHxVEj3LmFWUNIdewb7oEgNNBskInmOGWsCmQeuv9Umemvu
 
 // general
 int res_time = 0;
-bool statusUpload = false;
-float frequency = 50;
 int daya_actual = 0;
 
 // waktu,lcd, add1115
 SimpleTimer timer;
 LiquidCrystal_I2C lcd(0x27 ,16,2);
 Adafruit_ADS1115 ads(0x48);
+RunningStatistics inputStats;
 
 // array dan object json
-StaticJsonDocument<200> json;
-JsonObject object = json.to<JsonObject>();
-char jsonReal[200];
-
 StaticJsonDocument<4096> doc;
-JsonArray d_voltase = doc.createNestedArray("voltase");
+JsonArray d_tegangan = doc.createNestedArray("tegangan");
 JsonArray d_arus = doc.createNestedArray("arus");
 JsonArray d_daya = doc.createNestedArray("daya");
 char jsonData[4096];
 
 // sensor zmpt101b
 #define ZMPT101B A0
-float windowLength = 100/frequency;    
-int voltase_actual = 0;
+float windowLength = 100/50;    
+int tegangan_actual = 0;
 int RawValue = 0;
-unsigned long printPeriod = 2500;
 unsigned long previousMillis = 0;
 
 // sensor acs712
 int pin_acs = 0;
 int zero;
 float arus_actual = 0;
+int16_t Inow;
+uint32_t Isum = 0;
+int measurements_count = 0;
 
-RunningStatistics inputStats;
-
+int number = 0;
 void calibrate_acs712() {
   uint32_t acc = 0;
   int sampling = 100;
@@ -73,71 +69,87 @@ void setup() {
     lcd.setCursor(0, 1);
     lcd.print("Menghubungkan");
     delay(500);
+    
+    Serial.print(".");
   }
   lcd.setCursor(0, 1);
   lcd.print("Terhubung       ");
   delay(1000);
   lcd.clear();
-
+  
   ads.begin();
   inputStats.setWindowSecs(windowLength);
   calibrate_acs712();
 
   timer.setInterval(1000, tempData);
-  timer.setInterval(10000, ubah);
-  timer.setInterval(30000, upload);
+  timer.setInterval(20000, upload);
 }
 
 void loop() {
   timer.run();
+
+  // tegangan
   RawValue = analogRead(ZMPT101B);
   inputStats.input(RawValue);
-  if((unsigned long)(millis() - previousMillis) >= printPeriod) {
-    previousMillis = millis();
-    voltase_actual = inputStats.sigma() * 2.5;
-    get_arus();
-    
-    lcd.setCursor(0, 0);
-    lcd.print("V:" + String(voltase_actual) +"   ");
+
+  // arus
+  if(millis() % 8 == 0){
+    Inow = ads.readADC_SingleEnded(pin_acs) - zero;
+    Isum += Inow * Inow;
+    measurements_count++;
   }
+    
+  if((unsigned long)(millis() - previousMillis) >= 2000) {
+    previousMillis = millis();
+
+    // tegangan
+    tegangan_actual = inputStats.sigma() * 2.5;    
+    lcd.setCursor(0, 0);
+    lcd.print("V:" + String(tegangan_actual) +"   ");
+
+    // arus
+    arus_actual = sqrt(Isum / measurements_count) / 32767 * 6.144 / 0.066;
+    lcd.setCursor(8, 0);
+    lcd.print("I:" + String(arus_actual) +"   ");
+//    lcd.print("I:" + String(measurements_count) +"   ");
+
+    // daya
+    daya_actual = tegangan_actual * arus_actual;
+    d_daya.add(daya_actual/60);
+    lcd.setCursor(0, 1);
+    lcd.print("P:" + String(daya_actual) +"   ");
+
+    // set ke awal
+    Isum = 0;
+    measurements_count = 0;
+    
+    Serial.println(number);
+    number = 0;
+  }
+  number++;
 }
 
 void tempData(){
-  // voltase
-  d_voltase.add(voltase_actual);
+  // tegangan
+  d_tegangan.add(tegangan_actual);
 
   // arus
   d_arus.add(arus_actual);
   
   // daya
-  daya_actual = voltase_actual*arus_actual;
-  lcd.setCursor(0, 1);
-  lcd.print("P:" + String(daya_actual) +"   ");
-  d_daya.add(daya_actual);
-}
-
-void ubah(){
-  object["voltase"] = voltase_actual;
-  object["arus"] = arus_actual;
-  object["daya"] = daya_actual;
-  serializeJson(object, jsonReal);
-  
-  const char* serverName = "http://restapi-ta.kubusoftware.com/pantauan"; // Alamat server Online
-  http.begin(serverName);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("Authorization", api_key);
-  int httpResponseCode = http.POST(jsonReal);
+  daya_actual = tegangan_actual*arus_actual;
+  d_daya.add(daya_actual/60);
 }
 
 void upload(){
   if(WiFi.status() == WL_CONNECTED){
     serializeJson(doc, jsonData);
     lcd.setCursor(8, 1);
-    lcd.print("Upload");
+    lcd.print("Upload  ");
     
     //upload data
     int waktu = millis();
-    const char* serverName = "http://restapi-ta.kubusoftware.com/penggunaan"; // Alamat server Online
+    const char* serverName = "http://tugasakhir.kubusoftware.com/penggunaan"; // Alamat server Online
     http.begin(serverName);
     http.addHeader("Content-Type", "application/json");
     http.addHeader("Authorization", api_key);
@@ -146,43 +158,18 @@ void upload(){
     if (httpResponseCode == 201) {
       res_time = millis() - waktu;
       deleteData();
-      String payload = http.getString();
     }else{
       res_time = 0;
     }
     http.end();
-    delay(100);
     lcd.setCursor(8, 1);
-    lcd.print("W:" + String(res_time) + "ms ");
+    lcd.print("W:" + String(res_time) + "ms      ");
   }
 }
 
 void deleteData(){
     doc.clear();    
-    JsonArray d_voltase = doc.createNestedArray("voltase");
+    JsonArray d_tegangan = doc.createNestedArray("tegangan");
     JsonArray d_arus = doc.createNestedArray("arus");
     JsonArray d_daya = doc.createNestedArray("daya");
-}
-
-void get_arus(){
-  uint32_t period = 1000;
-  uint32_t t_start = micros();
-
-  int16_t dataMax = 0;
-  int16_t Inow;
-  uint32_t Isum = 0;
-  int measurements_count = 0;
-
-  while (micros() - t_start < period) {
-    for (int i = 0; i < 10; i++) {
-      int adc = ads.readADC_SingleEnded(pin_acs);
-      if (adc > dataMax) dataMax = adc;
-    }
-    Inow = dataMax - zero;
-    Isum += Inow * Inow;
-    measurements_count++;
-  }
-  arus_actual = sqrt(Isum / measurements_count) / 32767 * 6.144 / 0.066;
-  lcd.setCursor(8, 0);
-  lcd.print("I:" + String(arus_actual) +"   "); 
 }

@@ -9,6 +9,7 @@ int zero = 0;
 
 void setup() 
 {
+  Serial.begin(115200);
   ads.begin();
   lcd.begin ();
   calibrate();
@@ -21,7 +22,7 @@ void loop()
   lcd.setCursor(0, 1);
   lcd.print("Ampere: " + String(getACS()));
 
-  delay(1000);
+  delay(2000);
 }
 
 float getACS(){
@@ -34,15 +35,16 @@ float getACS(){
   uint16_t measurements_count = 0;
 
   while (micros() - t_start < period) {
-    for (int i = 0; i < 10; i++) {
-      int adc = ads.readADC_SingleEnded(pin_acs);
-      if (adc > dataMax) dataMax = adc;
-    }
-    Inow = dataMax - zero;
+//    for (int i = 0; i < 10; i++) {
+//      int adc = ads.readADC_SingleEnded(pin_acs);
+//      if (adc > dataMax) dataMax = adc;
+//    }
+    Inow = ads.readADC_SingleEnded(pin_acs) - zero;
     Isum += Inow * Inow;
     measurements_count++;
   }
-  return sqrt(Isum / measurements_count) / 32735 * 6.138 / 0.066;
+  Serial.println(sqrt(Isum / measurements_count));
+  return sqrt(Isum / measurements_count) / 32767 * 6.144 / 0.066;
 }
 
 void calibrate() {

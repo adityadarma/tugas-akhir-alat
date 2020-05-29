@@ -5,7 +5,7 @@ Adafruit_ADS1115 ads(0x48);
  
 void setup(void)
 {
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println("Hello!");
    
   Serial.println("Getting single-ended readings from AIN0..3");
