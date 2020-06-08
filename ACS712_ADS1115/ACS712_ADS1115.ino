@@ -35,11 +35,11 @@ float getACS(){
   uint16_t measurements_count = 0;
 
   while (micros() - t_start < period) {
-//    for (int i = 0; i < 10; i++) {
-//      int adc = ads.readADC_SingleEnded(pin_acs);
-//      if (adc > dataMax) dataMax = adc;
-//    }
-    Inow = ads.readADC_SingleEnded(pin_acs) - zero;
+    for (int i = 0; i < 10; i++) {
+      int adc = ads.readADC_SingleEnded(pin_acs);
+      if (adc > dataMax) dataMax = adc;
+    }
+    Inow = dataMax - zero;
     Isum += Inow * Inow;
     measurements_count++;
   }
