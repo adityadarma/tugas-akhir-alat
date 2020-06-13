@@ -37,19 +37,6 @@ void setup() {
   node.begin(1, pzem);
   WiFi.begin(ssid, password);
   
-  lcd.setCursor(0, 0);
-  lcd.print("Status wifi:");
-  lcd.setCursor(0, 1);
-  lcd.print("Memeriksa");
-  delay(1000);
-  while(WiFi.status() != WL_CONNECTED) {
-    lcd.setCursor(0, 1);
-    lcd.print("Menghubungkan");
-    delay(500);
-  }
-  lcd.setCursor(0, 1);
-  lcd.print("Terhubung       ");
-  
   timer.setInterval(1000, saveData);
   timer.setInterval(2000, readData);
   timer.setInterval(15000, uploadData);
@@ -65,6 +52,13 @@ void loop() {
   lcd.print("V:" + String(U_PR) +"   ");
   lcd.setCursor(8, 0);
   lcd.print("I:" + String(I_PR) +"   ");
+
+  lcd.setCursor(15, 0);
+  if(WiFi.status() == WL_CONNECTED){
+    lcd.print("C");
+  }else{
+    lcd.print("D");
+  }
 
   lcd.setCursor(0, 1);
   lcd.print("F:" + String(PR_PF));
