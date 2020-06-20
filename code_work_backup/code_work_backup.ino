@@ -4,8 +4,12 @@
 #include <SimpleTimer.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
-#include <Filters.h>
-#include <Adafruit_ADS1015.h>
+#include <ModbusMaster.h>  // Komunikasi RS232/485 (via RTU protocol)
+#include <SoftwareSerial.h>  //  ( NODEMCU ESP8266 )
+
+// komunikasi dengan PZEM-004T
+SoftwareSerial pzem(D5,D6);  // (TX,RX) NodeMCU
+ModbusMaster node; 
 
 // http server
 HTTPClient http;
@@ -14,142 +18,85 @@ const char* password = "terusmeganti";
 const char* api_key = "Bearer 3HhTHxVEj3LmFWUNIdewb7oEgNNBskInmOGWsCmQeuv9UmemvuoIZCepgtzy"; // API_KEY
 
 // general
-int res_time = 0;
-int daya_actual = 0;
-
-// waktu,lcd, add1115
 SimpleTimer timer;
 LiquidCrystal_I2C lcd(0x27 ,16,2);
-Adafruit_ADS1115 ads(0x48);
-RunningStatistics inputStats;
+int U_PR;
+double I_PR;
+double PF_PR;
+int P_PR;
+int res_time = 0;
 
 // array dan object json
 StaticJsonDocument<4096> doc;
-JsonArray d_tegangan = doc.createNestedArray("tegangan");
-JsonArray d_arus = doc.createNestedArray("arus");
-JsonArray d_daya = doc.createNestedArray("daya");
+JsonArray daya_aktif = doc.createNestedArray("daya_aktif");
 char jsonData[4096];
-
-// sensor zmpt101b
-#define ZMPT101B A0
-float windowLength = 100/50;    
-int tegangan_actual = 0;
-int RawValue = 0;
-unsigned long previousMillis = 0;
-
-// sensor acs712
-int pin_acs = 0;
-int zero;
-float arus_actual = 0;
-int16_t Inow;
-uint32_t Isum = 0;
-int measurements_count = 0;
-
-//int number = 0;
-void calibrate_acs712() {
-  uint32_t acc = 0;
-  int sampling = 100;
-  for (int i = 0; i < sampling; i++) {
-    acc += ads.readADC_SingleEnded(pin_acs);
-  }
-  zero = acc / sampling;
-}
 
 void setup() {
   Serial.begin(115200);
   lcd.begin ();
+  pzem.begin(9600);
+  node.begin(1, pzem);
   WiFi.begin(ssid, password);
   
-  lcd.setCursor(0, 0);
-  lcd.print("Status wifi:");
-  lcd.setCursor(0, 1);
-  lcd.print("Memeriksa");
-  delay(1000);
-  while(WiFi.status() != WL_CONNECTED) {
-    lcd.setCursor(0, 1);
-    lcd.print("Menghubungkan");
-    delay(500);
-    
-    Serial.print(".");
-  }
-  lcd.setCursor(0, 1);
-  lcd.print("Terhubung       ");
+  timer.setInterval(1000, saveData);
+  timer.setInterval(3000, readData);
+  timer.setInterval(15000, uploadData);
+  
   delay(1000);
   lcd.clear();
-  
-  ads.begin();
-  inputStats.setWindowSecs(windowLength);
-  calibrate_acs712();
-
-  timer.setInterval(1000, tempData);
-  timer.setInterval(20000, upload);
 }
 
 void loop() {
   timer.run();
-
-  // tegangan
-  RawValue = analogRead(ZMPT101B);
-  inputStats.input(RawValue);
-
-  // arus
-  if(millis() % 8 == 0){
-    Inow = ads.readADC_SingleEnded(pin_acs) - zero;
-    Isum += Inow * Inow;
-    measurements_count++;
-  }
     
-  if((unsigned long)(millis() - previousMillis) >= 2000) {
-    previousMillis = millis();
+  lcd.setCursor(0, 0);
+  lcd.print("V:" + String(U_PR) +"   ");
+  lcd.setCursor(8, 0);
+  lcd.print("I:" + String(I_PR) +"   ");
 
-    // tegangan
-    tegangan_actual = inputStats.sigma() * 2.5;    
-    lcd.setCursor(0, 0);
-    lcd.print("V:" + String(tegangan_actual) +"   ");
-
-    // arus
-    arus_actual = sqrt(Isum / measurements_count) / 32767 * 6.144 / 0.066;
-    lcd.setCursor(8, 0);
-    lcd.print("I:" + String(arus_actual) +"   ");
-//    lcd.print("I:" + String(measurements_count) +"   ");
-
-    // daya
-    daya_actual = tegangan_actual * arus_actual;
-    d_daya.add(daya_actual);
-    lcd.setCursor(0, 1);
-    lcd.print("P:" + String(daya_actual) +"   ");
-
-    // set ke awal
-    Isum = 0;
-    measurements_count = 0;
-    
-//    Serial.println(number);
-//    number = 0;
-  }
-//  number++;
-}
-
-void tempData(){
-  // tegangan
-  d_tegangan.add(tegangan_actual);
-
-  // arus
-  d_arus.add(arus_actual);
-  
-  // daya
-  daya_actual = tegangan_actual*arus_actual;
-  d_daya.add(daya_actual);
-}
-
-void upload(){
+  lcd.setCursor(15, 0);
   if(WiFi.status() == WL_CONNECTED){
+    lcd.print("C");
+  }else{
+    lcd.print("D");
+  }
+
+  lcd.setCursor(0, 1);
+  lcd.print("F:" + String(PF_PR));
+  lcd.setCursor(8, 1);
+  lcd.print("P:" + String(P_PR) +" ");
+}
+
+void readData(){
+  uint8_t result = node.readInputRegisters(0x0000, 10);
+  if (result == node.ku8MBSuccess)  {
+    U_PR      = (node.getResponseBuffer(0x00)/10.0f);   // V
+    I_PR      = (node.getResponseBuffer(0x01)/1000.000f);   //  A
+    P_PR      = (node.getResponseBuffer(0x03)/10.0f);   //  W
+    PF_PR     = (node.getResponseBuffer(0x08)/100.0f);
+  }else{
+    U_PR      = 0;
+    I_PR      = 0;
+    P_PR      = 0;
+    PF_PR     = 0;
+  }
+}
+
+void saveData(){
+  daya_aktif.add(P_PR);
+}
+
+void uploadData(){
+  if(WiFi.status() == WL_CONNECTED){
+    doc["tegangan"] = U_PR;
+    doc["arus"] = I_PR;
+    doc["faktor_daya"] = PF_PR;
+    doc["daya"] = P_PR;
     serializeJson(doc, jsonData);
-    lcd.setCursor(8, 1);
-    lcd.print("Upload  ");
     
-    //upload data
+    // proses mulai upload data
     int waktu = millis();
-    const char* serverName = "http://tugasakhir.kubusoftware.com/penggunaan"; // Alamat server Online
+    const char* serverName = "http://restapi-ta.kubusoftware.com/penggunaan";
     http.begin(serverName);
     http.addHeader("Content-Type", "application/json");
     http.addHeader("Authorization", api_key);
@@ -157,19 +104,14 @@ void upload(){
   
     if (httpResponseCode == 201) {
       res_time = millis() - waktu;
-      deleteData();
+      doc.clear();
+      JsonArray daya_aktif = doc.createNestedArray("daya_aktif");
     }else{
       res_time = 0;
     }
     http.end();
-    lcd.setCursor(8, 1);
-    lcd.print("W:" + String(res_time) + "ms      ");
+    // slese upload data
+    
+    Serial.println(String(res_time) + " ms");
   }
-}
-
-void deleteData(){
-    doc.clear();    
-    JsonArray d_tegangan = doc.createNestedArray("tegangan");
-    JsonArray d_arus = doc.createNestedArray("arus");
-    JsonArray d_daya = doc.createNestedArray("daya");
 }
