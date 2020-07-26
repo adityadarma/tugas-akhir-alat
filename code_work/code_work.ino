@@ -11,8 +11,8 @@ SoftwareSerial pzem(D5,D6);  // (TX,RX) NodeMCU
 ModbusMaster node; 
 
 // konfigurasi wifi
-const char* ssid = "WIFI_EXT";
-const char* password = "terusmeganti";
+const char* ssid = "WIFI_EXT"; // WIFI_EXT
+const char* password = "!@#$%12345"; // terusmeganti
 
 // konfigurasi firebase
 #define FIREBASE_HOST "wattmeter-9f837.firebaseio.com"  
@@ -20,8 +20,10 @@ const char* password = "terusmeganti";
 
 // general
 LiquidCrystal_I2C lcd(0x27 ,16,2);
-int U_PR, P_PR;
-float I_PR, PF_PR;
+int U, U_temp;
+int P, P_temp;
+float PF, PF_temp;
+float I, I_temp;
 uint8_t result;
 
 void setup() {
@@ -43,25 +45,38 @@ void setup() {
 void loop() {
   result = node.readInputRegisters(0x0000, 10);
   if (result == node.ku8MBSuccess)  {
-    U_PR      = (node.getResponseBuffer(0x00)/10.0f);   // V
-    I_PR      = (node.getResponseBuffer(0x01)/1000.000f);   //  A
-    PF_PR     = (node.getResponseBuffer(0x08)/100.0f);
-    P_PR      = (U_PR * I_PR) * PF_PR;   //  W
+    U      = (node.getResponseBuffer(0x00)/10.0f);   // V
+    I      = (node.getResponseBuffer(0x01)/1000.000f);   //  A
+    PF     = (node.getResponseBuffer(0x08)/100.0f);
+    P      = (U * I) * PF;   //  W
   }
     
   lcd.setCursor(0, 0);
-  lcd.print("V:" + String(U_PR) +"   ");
-  Firebase.setInt("tegangan", U_PR);
+  lcd.print("V:" + String(U) +"   ");
+  if(U_temp != U){
+     Firebase.setInt("tegangan", U);
+     U_temp = U;
+  }
   
   lcd.setCursor(8, 0);
-  lcd.print("I:" + String(I_PR, 3) +"   ");
-  Firebase.setFloat("arus", I_PR);
+  lcd.print("I:" + String(I, 3) +"   ");
+  if(I_temp != I){
+    Firebase.setFloat("arus", I);
+    I_temp = I;
+  }
   
   lcd.setCursor(0, 1);
-  lcd.print("F:" + String(PF_PR));
-  Firebase.setFloat("faktor_daya", PF_PR);
+  lcd.print("F:" + String(PF));
+  if(PF_temp != PF){
+    Firebase.setFloat("faktor_daya", PF);
+    PF_temp = PF;
+  }
   
   lcd.setCursor(8, 1);
-  lcd.print("P:" + String(P_PR) +"   ");
-  Firebase.setInt("daya", P_PR);
+  lcd.print("P:" + String(P) +"   ");
+  if(P_temp != P){
+    Firebase.setInt("daya", P);
+    P_temp = P;
+  }
+  delay(2000);
 }
